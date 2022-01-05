@@ -84,7 +84,7 @@ def getData(discharge_time,dintv_wesm,dcchargeint_wesm,charge_time,cintv_wesm,cc
     moneyCalc = pd.DataFrame(columns=['ts','min_charge','min_discharge','min_profit','hour_charge','hour_discharge','hour_profit'],index=range(0,int((end_date-start_date).days)+1))
     moneyCalc['ts'] = pd.date_range(start_date, end_date,freq='D')
     moneyCalc['ts'] = pd.to_datetime(moneyCalc['ts']).dt.date
-    st.write(moneyCalc.dtypes['ts'])
+    #st.write(moneyCalc.dtypes['ts'])
 
     this_date = start_date
     delta = datetime.timedelta(days=1)
@@ -116,7 +116,7 @@ def getData(discharge_time,dintv_wesm,dcchargeint_wesm,charge_time,cintv_wesm,cc
         
         this_date += delta
 
-    st.write(moneyCalc.head(5))
+    #st.write(moneyCalc.head(5))
     return moneyCalc
 
 calcData = getData(discharge_time,dintv_wesm,dcchargeint_wesm,charge_time,cintv_wesm,cchargeint_wesm,start_date,end_date)
@@ -216,3 +216,129 @@ s3col3.number_input('Charging Cost (PhP)',round(hour_charge,2),round(hour_charge
 s3col3.number_input('Discharging Income (PhP)',round(hour_discharge,2),round(hour_discharge,2),round(hour_discharge,2))
 s3col3.number_input('Profit (PhP)', round(hour_profit,2), round(hour_profit,2), round(hour_profit,2))
 
+st.title('RC WESM Rates Analaysis')
+st.text('Analysis of BESS performance given RC WESM 2021 Data')
+
+start_date_RC = datetime.date(2021,1,1)
+end_date_RC = datetime.date (2021,12,31)
+
+@st.cache(suppress_st_warning=True)
+def getRCData(discharge_time,charge_time,start_date_RC,end_date_RC):
+    moneyCalc = pd.DataFrame(columns=['ts','hour_charge','hour_discharge','hour_profit'],index=range(0,int((end_date_RC-start_date_RC).days)+1))
+    moneyCalc['ts'] = pd.date_range(start_date_RC, end_date_RC,freq='D')
+    moneyCalc['ts'] = pd.to_datetime(moneyCalc['ts']).dt.date
+    #st.write(moneyCalc.dtypes['ts'])
+
+    this_date = start_date_RC
+    delta = datetime.timedelta(days=1)
+
+    while this_date<=end_date_RC:
+        cut1 = data2021.loc[data2021['ts_day']==str(this_date)]
+
+        cut1top = cut1.nlargest(int(np.ceil(discharge_time)),'WESM Rate',keep='all')
+        cut1bot = cut1.nsmallest(int(np.ceil(charge_time)),'WESM Rate',keep='all')
+
+        hour_charge = (np.floor(charge_time)*battery_kw*sum(cut1bot['WESM Rate'].iloc[:-1]))+(((charge_time%1)*battery_kw)*cut1bot['WESM Rate'].iloc[-1])
+        hour_discharge = (np.floor(discharge_time)*battery_kw*sum(cut1bot['WESM Rate'].iloc[:-1]))+((cintv_wesm%1)*battery_kw*cut1bot['WESM Rate'].iloc[-1])
+        hour_profit = hour_discharge-hour_charge
+
+        moneyCalc.hour_charge.loc[moneyCalc.ts == this_date] = hour_charge
+        moneyCalc.hour_discharge.loc[moneyCalc.ts == this_date] = hour_discharge
+        moneyCalc.hour_profit.loc[moneyCalc.ts == this_date] = hour_profit
+        
+        this_date += delta
+
+    #st.write(moneyCalc.head(5))
+    moneyCalc['ts_month'] = pd.DatetimeIndex(moneyCalc['ts']).month
+    return moneyCalc
+
+# value = 1.0
+# st.write(data2021.loc[data2021['WESM Rate']<=value])
+# st.write(data2021.loc[data2021['WESM Rate']<=value].shape)
+RC_data = getRCData(discharge_time, charge_time, start_date_RC, end_date_RC)
+#st.write(RC_data.loc[RC_data.ts_month == 1])
+months = 12
+RC_monthly = pd.DataFrame(columns=['month','charge','discharge','profit'],index=range(0,months))
+for i in range(0,months):
+    datetime_object =     datetime.datetime.strptime(str(i+1), "%m")
+    RC_monthly['month'].iloc[i] = datetime_object.strftime("%B")
+    RC_monthly['charge'].iloc[i] = RC_data['hour_charge'].loc[RC_data.ts_month == (i+1)].sum()
+    RC_monthly['discharge'].iloc[i] = RC_data['hour_discharge'].loc[RC_data.ts_month == (i+1)].sum()
+    RC_monthly['profit'].iloc[i] = RC_data['hour_profit'].loc[RC_data.ts_month == (i+1)].sum()
+
+st.dataframe(RC_monthly,height=500)
+
+st.title('211208 Code Analysis')
+@st.cache
+def runOldCode(discharge_time,charge_time):
+    moneyCalc = pd.DataFrame(columns=['ts','battery_state','hour_charge','hour_discharge'],index=range(0,int((end_date_RC-start_date_RC).days)+1))
+    moneyCalc['ts'] = pd.date_range(start_date_RC, end_date_RC,freq='D')
+    moneyCalc['ts'] = pd.to_datetime(moneyCalc['ts']).dt.date
+
+    partial_charge_rate = pcr
+    partial_discharge_rate = pdr
+    this_year = start_year + year_iter
+    charge_time = charge_int
+    discharge_time = discharge_int
+    charge_hours = int(np.ceil(charge_time+partial_charge_rate))
+    discharge_hours = int(np.ceil(discharge_time+partial_discharge_rate))
+    bs_charge = 0
+    bs_pcharge = 0
+    bs_discharge = 0
+    bs_pdischarge=0
+    charge_cycles = 0
+    discharge_cycles = 0
+    income = 0
+    cost = 0
+    print(WESM_this_year)
+    battery_state = np.zeros(shape=8760, dtype=int)
+    while(i!=len(battery_state)):
+        try: 
+            charge_window = WESM_this_year[i:i+16]
+            print(charge_window)
+            cindex = (charge_window).argsort()[:charge_hours]
+            print(cindex)
+            for j in range(0,len(cindex)):
+                this_index = i+cindex[j]
+                if j == (len(cindex)-1) and partial_charge_rate>0.0:
+                    battery_state[this_index] = 2
+                    bs_pcharge = bs_pcharge + 1
+                    cost = cost+(WESM_this_year[this_index]*partial_charge_rate*battery_kw)
+                else:
+                    battery_state[this_index] = 1 # Charging
+                    bs_charge = bs_charge+1
+                    cost = cost + (WESM_this_year[this_index]*battery_kw)
+            charge_cycles = charge_cycles + 1
+
+            print(battery_state[0:24])
+            i = i+np.amax(cindex)+1
+            print(i)
+
+            discharge_window = WESM_this_year[i:i+activity_interval]
+            print(discharge_window)
+            dindex = (-discharge_window).argsort()[:discharge_hours]
+            print(dindex)
+            for j in range(0,len(dindex)):
+                this_index = i+dindex[j]
+                if j == (len(dindex)-1) and partial_discharge_rate>0.0:
+                    battery_state[this_index] = 4
+                    bs_pdischarge = bs_pdischarge + 1
+                    income = income+(WESM_this_year[this_index]*partial_discharge_rate*battery_kw)
+                else:
+                    battery_state[this_index] = 3 # Discharging
+                    bs_discharge = bs_discharge + 1
+                    income = income + (WESM_this_year[this_index]*battery_kw)
+            print(battery_state[0:24])
+            discharge_cycles = discharge_cycles+1
+            i = i+np.amax(dindex)+1
+        #print(i)
+        except Exception as e:
+            #print(i,'//',e)
+            break
+    count_hours = np.bincount(battery_state)
+    hours_charging = bs_charge+ partial_charge_rate*bs_pcharge
+    hours_discharging = bs_discharge + partial_discharge_rate*bs_pdischarge
+    hours_idle = 8760 - (hours_charging+hours_discharging)
+    profit = income - cost
+    results = np.array([this_year,(charge_time+partial_charge_rate),(discharge_time+partial_discharge_rate),activity_interval,hours_charging, hours_discharging,hours_idle,charge_cycles,discharge_cycles,round(cost,2),round(income,2),round(profit,2)])
+    return results
