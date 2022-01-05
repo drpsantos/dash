@@ -269,6 +269,7 @@ for i in range(0,months):
 st.dataframe(RC_monthly,height=500)
 
 st.title('211208 Code Analysis')
+st.title('Trial ipad')
 @st.cache
 def runOldCode(discharge_time,charge_time):
     moneyCalc = pd.DataFrame(columns=['ts','battery_state','hour_charge','hour_discharge'],index=range(0,int((end_date_RC-start_date_RC).days)+1))
